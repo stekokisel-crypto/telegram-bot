@@ -13,7 +13,7 @@ bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
 
 client = genai.Client(api_key=GEMINI_API_KEY)
-MODEL_NAME = 'gemini-2.0-flash'
+MODEL_NAME = 'models/gemini-3.6-flash'
 
 async def handle_ping(request):
     return web.Response(text="Bot is alive!")
@@ -111,4 +111,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+
