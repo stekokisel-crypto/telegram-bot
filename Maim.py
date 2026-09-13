@@ -24,6 +24,7 @@ async def chat_with_groq(message: types.Message):
                 {"role": "user", "content": message.text}
             ],
             model="openai/gpt-oss-20b",
+            max_tokens=1000
         )
         answer = chat_completion.choices[0].message.content
         await message.answer(answer)
