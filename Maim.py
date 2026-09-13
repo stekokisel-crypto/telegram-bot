@@ -15,6 +15,7 @@ dp = Dispatcher()
 client = genai.Client(api_key=GEMINI_API_KEY)
 FAST_MODEL = 'gemini-2.5-flash'
 
+
 # Веб-сервер для удержания порта на Render
 async def handle_ping(request):
     return web.Response(text="Bot is alive!")
