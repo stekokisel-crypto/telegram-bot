@@ -11,12 +11,9 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
 
-# Используем официальный клиент Google GenAI с актуальной быстрой моделью
 client = genai.Client(api_key=GEMINI_API_KEY)
-FAST_MODEL = 'gemini-2.5-flash'
+FAST_MODEL = 'gemini-3.6-flash'
 
-
-# Веб-сервер для удержания порта на Render
 async def handle_ping(request):
     return web.Response(text="Bot is alive!")
 
@@ -32,14 +29,13 @@ async def web_server():
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     await message.answer(
-        "Привет! Я готов к работе.\n\n"
+        "Привет! Бот полностью обновлен на модель **gemini-3.6-flash**.\n\n"
         "📸 **Фото**: отправь картинку товара\n"
         "🎙 **Голос**: отправь голосовое сообщение\n"
         "🎨 **Генерация**: `/image [описание]`\n"
         "💬 **Текст**: пиши любые вопросы!"
     )
 
-# Команда для генерации изображений: /image <описание>
 @dp.message(Command("image"))
 async def cmd_generate_image(message: types.Message):
     query = message.text.replace("/image", "").strip()
@@ -62,7 +58,6 @@ async def cmd_generate_image(message: types.Message):
     except Exception as e:
         await message.answer(f"Не удалось сгенерировать: {e}")
 
-# Обработка фотографий
 @dp.message(F.photo)
 async def handle_photo(message: types.Message):
     photo_file_path = None
@@ -74,7 +69,6 @@ async def handle_photo(message: types.Message):
         photo_file_path = f"photo_{message.from_user.id}.jpg"
         await message.bot.download_file(file_info.file_path, photo_file_path)
 
-        # Загружаем файл через клиент Google GenAI
         uploaded_file = client.files.upload(file=photo_file_path)
         prompt_text = message.caption if message.caption else "Оцени этот товар, опиши его и помоги найти."
 
@@ -95,7 +89,6 @@ async def handle_photo(message: types.Message):
         if photo_file_path and os.path.exists(photo_file_path):
             os.remove(photo_file_path)
 
-# Обработка голосовых сообщений (с улучшенным чтением аудио)
 @dp.message(F.voice)
 async def handle_voice(message: types.Message):
     voice_file_path = None
@@ -125,7 +118,6 @@ async def handle_voice(message: types.Message):
         if voice_file_path and os.path.exists(voice_file_path):
             os.remove(voice_file_path)
 
-# Обработка текстовых сообщений
 @dp.message(F.text)
 async def chat_with_gemini(message: types.Message):
     try:
@@ -148,5 +140,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+            
             
