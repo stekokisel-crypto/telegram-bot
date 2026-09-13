@@ -47,7 +47,7 @@ async def handle_voice(message: types.Message):
                 {"role": "system", "content": "Ты — профессиональный, экспертный и глубокий AI-ассистент. Отвечай максимально развернуто, структурировано, детально и качественно на любые вопросы."},
                 {"role": "user", "content": user_text}
             ],
-            model="llama-3.3-70b-versatile",
+            model="qwen/qwen3.6-27b",
             max_tokens=1500,
             temperature=0.7
         )
