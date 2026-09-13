@@ -1,2 +1,2 @@
 aiogram
-groq
+google-genai
