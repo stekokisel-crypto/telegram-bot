@@ -4,6 +4,7 @@ from aiohttp import web
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from google import genai
+from google.genai import types as genai_types
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -14,6 +15,7 @@ dp = Dispatcher()
 client = genai.Client(api_key=GEMINI_API_KEY)
 FAST_MODEL = 'gemini-3.6-flash'
 
+# Веб-сервер для удержания порта на Render
 async def handle_ping(request):
     return web.Response(text="Bot is alive!")
 
@@ -29,18 +31,17 @@ async def web_server():
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     await message.answer(
-        "Привет! Бот полностью обновлен на модель **gemini-3.6-flash**.\n\n"
-        "📸 **Фото**: отправь картинку товара\n"
-        "🎙 **Голос**: отправь голосовое сообщение\n"
-        "🎨 **Генерация**: `/image [описание]`\n"
-        "💬 **Текст**: пиши любые вопросы!"
+        "Привет! Ассистент с поиском Google в реальном времени запущен.\n\n"
+        "🔗 Напиши любой запрос — я найду информацию и прикреплю ссылки.\n"
+        "📸 Отправляй фото.\n"
+        "🎙 Отправляй голосовые сообщения."
     )
 
 @dp.message(Command("image"))
 async def cmd_generate_image(message: types.Message):
     query = message.text.replace("/image", "").strip()
     if not query:
-        await message.answer("Укажи описание, например: `/image кроссовки в студии`")
+        await message.answer("Укажи описание, например: `/image кроссовки`")
         return
     
     try:
@@ -58,33 +59,64 @@ async def cmd_generate_image(message: types.Message):
     except Exception as e:
         await message.answer(f"Не удалось сгенерировать: {e}")
 
+@dp.message(F.text)
+async def chat_with_search(message: types.Message):
+    try:
+        await message.bot.send_chat_action(message.chat.id, "typing")
+        
+        # Подключаем инструмент Google Search Grounding по официальному стандарту SDK
+        response = client.models.generate_content(
+            model=FAST_MODEL,
+            contents=message.text,
+            config=genai_types.GenerateContentConfig(
+                tools=[genai_types.Tool(google_search=genai_types.GoogleSearch())],
+            )
+        )
+        
+        reply_text = response.text if response.text else "Информация не найдена."
+        
+        # Сбор ссылок из источников поиска
+        links_section = ""
+        if response.candidates and response.candidates[0].grounding_metadata:
+            metadata = response.candidates[0].grounding_metadata
+            if metadata.grounding_chunks:
+                sources = []
+                for chunk in metadata.grounding_chunks:
+                    if chunk.web and chunk.web.uri:
+                        title = chunk.web.title or "Источник"
+                        url = chunk.web.uri
+                        sources.append(f"• [{title}]({url})")
+                if sources:
+                    links_section = "\n\n🔗 **Ссылки на сайты:**\n" + "\n".join(sources[:5])
+
+        await message.answer(reply_text + links_section, parse_mode="Markdown", disable_web_page_preview=True)
+
+    except Exception as e:
+        await message.answer(f"Ошибка запроса: {e}")
+
 @dp.message(F.photo)
 async def handle_photo(message: types.Message):
     photo_file_path = None
     try:
         await message.bot.send_chat_action(message.chat.id, "typing")
-        
         photo = message.photo[-1]
         file_info = await message.bot.get_file(photo.file_id)
         photo_file_path = f"photo_{message.from_user.id}.jpg"
         await message.bot.download_file(file_info.file_path, photo_file_path)
 
         uploaded_file = client.files.upload(file=photo_file_path)
-        prompt_text = message.caption if message.caption else "Оцени этот товар, опиши его и помоги найти."
+        prompt_text = message.caption if message.caption else "Найди информацию об этом объекте или товаре в интернете, дай ссылки."
 
         response = client.models.generate_content(
             model=FAST_MODEL,
-            contents=[uploaded_file, prompt_text]
+            contents=[uploaded_file, prompt_text],
+            config=genai_types.GenerateContentConfig(
+                tools=[genai_types.Tool(google_search=genai_types.GoogleSearch())],
+            )
         )
-        
-        await message.answer(response.text)
-
+        await message.answer(response.text, parse_mode="Markdown")
     except Exception as e:
-        if "503" in str(e) or "UNAVAILABLE" in str(e):
-            await message.answer("Сервер перегружен. Повтори отправку фото через пару секунд.")
-        else:
-            await message.answer(f"Ошибка: {e}")
-            
+        await message.answer(f"Ошибка с фото: {e}")
     finally:
         if photo_file_path and os.path.exists(photo_file_path):
             os.remove(photo_file_path)
@@ -94,7 +126,6 @@ async def handle_voice(message: types.Message):
     voice_file_path = None
     try:
         await message.bot.send_chat_action(message.chat.id, "typing")
-        
         voice = await message.bot.get_file(message.voice.file_id)
         voice_file_path = f"voice_{message.from_user.id}.ogg"
         await message.bot.download_file(voice.file_path, voice_file_path)
@@ -103,35 +134,17 @@ async def handle_voice(message: types.Message):
 
         response = client.models.generate_content(
             model=FAST_MODEL,
-            contents=[audio_file, "Внимательно прослушай это голосовое сообщение, расшифруй суть и ответь на него четко и по делу."]
+            contents=[audio_file, "Прослушай голосовое сообщение, выполни поиск в интернете и ответь на него с ссылками."],
+            config=genai_types.GenerateContentConfig(
+                tools=[genai_types.Tool(google_search=genai_types.GoogleSearch())],
+            )
         )
-        
-        await message.answer(response.text)
-
+        await message.answer(response.text, parse_mode="Markdown")
     except Exception as e:
-        if "503" in str(e) or "UNAVAILABLE" in str(e):
-            await message.answer("Сервер перегружен. Повтори голосовое.")
-        else:
-            await message.answer(f"Ошибка обработки голоса: {e}")
-            
+        await message.answer(f"Ошибка с голосом: {e}")
     finally:
         if voice_file_path and os.path.exists(voice_file_path):
             os.remove(voice_file_path)
-
-@dp.message(F.text)
-async def chat_with_gemini(message: types.Message):
-    try:
-        await message.bot.send_chat_action(message.chat.id, "typing")
-        response = client.models.generate_content(
-            model=FAST_MODEL,
-            contents=message.text,
-        )
-        await message.answer(response.text)
-    except Exception as e:
-        if "503" in str(e) or "UNAVAILABLE" in str(e):
-            await message.answer("Сервер перегружен. Повтори запрос.")
-        else:
-            await message.answer(f"Ошибка: {e}")
 
 async def main():
     asyncio.create_task(web_server())
@@ -140,5 +153,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-            
+
             
