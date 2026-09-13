@@ -12,10 +12,8 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
 
-# Инициализируем официальный клиент Google GenAI
 client = genai.Client(api_key=GEMINI_API_KEY)
-# Используем актуальную и самую умную поисковую модель
-MODEL_NAME = 'gemini-2.5-flash'
+MODEL_NAME = 'gemini-1.5-flash'
 
 async def handle_ping(request):
     return web.Response(text="Bot is alive!")
@@ -32,11 +30,7 @@ async def web_server():
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     await message.answer(
-        "Привет! Я твой полноценный AI-ассистент на базе Gemini с поддержкой поиска, голосовых и фото.\n\n"
-        "💬 **Текст / Поиск**: спрашивай что угодно, я найду информацию и дам ссылки\n"
-        "📸 **Фото**: отправляй изображения для анализа\n"
-        "🎙 **Голос**: отправляй голосовые сообщения\n"
-        "🎨 **Генерация**: `/image [описание]`"
+        "Привет! Я твой AI-ассистент. Готов помогать с поиском информации, товаров, анализом фото и голосовых."
     )
 
 @dp.message(Command("image"))
@@ -66,26 +60,24 @@ async def chat_with_gemini(message: types.Message):
     try:
         await message.bot.send_chat_action(message.chat.id, "typing")
         
-        # Подключаем встроенный инструмент Google Search, чтобы бот мог искать актуальные ссылки и цены
         response = client.models.generate_content(
             model=MODEL_NAME,
             contents=message.text,
             config=genai_types.GenerateContentConfig(
                 tools=[{"google_search": {}}],
                 system_instruction=(
-                    "Ты полезный, точный и вежливый AI-ассистент. "
-                    "Если пользователь ищет товары, услуги, цены или актуальные данные, обязательно выполняй поиск "
-                    "и предоставляй конкретные рекомендации вместе с найденными ссылками на сайты или магазины."
+                    "Ты — умный и полезный AI-ассистент. "
+                    "Если пользователь ищет товары, услуги или актуальные данные в конкретном регионе (например, в Днепре), "
+                    "обязательно выполняй поиск в интернете и формируй ответ со списком вариантов, ценами и прямыми ссылками."
                 )
             ),
         )
         
-        # Отправляем ответ без parse_mode, чтобы исключить любые ошибки форматирования символов
         await message.answer(response.text, disable_web_page_preview=False)
     except Exception as e:
         error_str = str(e)
         if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
-            await message.answer("⚠️ Превышен лимит запросов. Пожалуйста, подождите 30 секунд и повторите попытку.")
+            await message.answer("⚠️ Превышен лимит запросов. Подождите 30 секунд и повторите попытку.")
         else:
             await message.answer(f"Ошибка: {e}")
 
@@ -100,7 +92,7 @@ async def handle_photo(message: types.Message):
         await message.bot.download_file(file_info.file_path, photo_file_path)
 
         uploaded_file = client.files.upload(file=photo_file_path)
-        prompt_text = message.caption if message.caption else "Опиши этот объект, оцени его и подскажи полезную информацию с учетом актуальных данных."
+        prompt_text = message.caption if message.caption else "Опиши этот объект или товар, выполни поиск и дай полезные ссылки."
 
         response = client.models.generate_content(
             model=MODEL_NAME,
@@ -125,12 +117,11 @@ async def handle_voice(message: types.Message):
         voice_file_path = f"voice_{message.from_user.id}.ogg"
         await message.bot.download_file(voice.file_path, voice_file_path)
 
-        # Загружаем аудио с правильным MIME-типом для Telegram (.ogg)
         audio_file = client.files.upload(file=voice_file_path, config={"mime_type": "audio/ogg"})
 
         response = client.models.generate_content(
             model=MODEL_NAME,
-            contents=[audio_file, "Внимательно прослушай это голосовое сообщение, пойми суть задачи, при необходимости выполни поиск в интернете и дай развернутый ответ с полезными ссылками."],
+            contents=[audio_file, "Внимательно прослушай голосовое сообщение, найди нужную информацию в интернете и дай подробный ответ с ссылками."],
             config=genai_types.GenerateContentConfig(
                 tools=[{"google_search": {}}]
             )
@@ -139,9 +130,9 @@ async def handle_voice(message: types.Message):
     except Exception as e:
         error_str = str(e)
         if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
-            await message.answer("⚠️ Превышен лимит запросов. Пожалуйста, подождите 30 секунд и повторите попытку.")
+            await message.answer("⚠️ Превышен лимит запросов. Подождите 30 секунд и повторите попытку.")
         else:
-            await message.answer(f"Ошибка с голосовым сообщением: {e}")
+            await message.answer(f"Ошибка с голосом: {e}")
     finally:
         if voice_file_path and os.path.exists(voice_file_path):
             os.remove(voice_file_path)
@@ -153,3 +144,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
