@@ -76,7 +76,12 @@ async def chat_with_groq(message: types.Message):
         await message.answer(f"Произошла ошибка: {e}")
 
 async def main():
+    await bot.delete_webhook(drop_pending_updates=True) # Сбрасывает зависшие запросы
     await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
+    
 
 if __name__ == "__main__":
     asyncio.run(main())
