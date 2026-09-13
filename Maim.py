@@ -11,7 +11,9 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
 
+# Используем официальный клиент Google GenAI с актуальной быстрой моделью
 client = genai.Client(api_key=GEMINI_API_KEY)
+FAST_MODEL = 'gemini-2.5-flash'
 
 # Веб-сервер для удержания порта на Render
 async def handle_ping(request):
@@ -29,12 +31,11 @@ async def web_server():
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     await message.answer(
-        "Привет! Я твой продвинутый ассистент на базе Gemini 3.6 Flash.\n\n"
-        "Что я умею:\n"
-        "📸 **Поиск по фото**: отправь мне фото или скриншот товара, и я помогу его найти/оценить.\n"
-        "🎨 **Создание фото**: напиши `/image [описание]` (например: `/image кроссовки в студийном свете`), и я сгенерирую картинку.\n"
-        "🎙 **Голосовые**: отправь голосовое сообщение, я прослушаю и отвечу.\n"
-        "💬 **Текст**: просто пиши любые вопросы!"
+        "Привет! Я готов к работе.\n\n"
+        "📸 **Фото**: отправь картинку товара\n"
+        "🎙 **Голос**: отправь голосовое сообщение\n"
+        "🎨 **Генерация**: `/image [описание]`\n"
+        "💬 **Текст**: пиши любые вопросы!"
     )
 
 # Команда для генерации изображений: /image <описание>
@@ -42,12 +43,11 @@ async def cmd_start(message: types.Message):
 async def cmd_generate_image(message: types.Message):
     query = message.text.replace("/image", "").strip()
     if not query:
-        await message.answer("Пожалуйста, укажи описание после команды, например: `/image кроссовки`")
+        await message.answer("Укажи описание, например: `/image кроссовки в студии`")
         return
     
     try:
         await message.bot.send_chat_action(message.chat.id, "upload_photo")
-        # Используем современную генерацию изображений через клиент Google GenAI
         result = client.models.generate_images(
             model='imagen-3.0-generate-002',
             prompt=query,
@@ -56,32 +56,29 @@ async def cmd_generate_image(message: types.Message):
         for generated_image in result.generated_images:
             image_bytes = generated_image.image.image_bytes
             photo_file = types.BufferedInputFile(image_bytes, filename="generated.jpg")
-            await message.answer_photo(photo=photo_file, caption=f"🎨 По запросу: {query}")
+            await message.answer_photo(photo=photo_file, caption=f"🎨 {query}")
             return
     except Exception as e:
-        await message.answer(f"Не удалось сгенерировать изображение: {e}")
+        await message.answer(f"Не удалось сгенерировать: {e}")
 
-# Обработка фотографий (поиск/оценка товара)
+# Обработка фотографий
 @dp.message(F.photo)
 async def handle_photo(message: types.Message):
     photo_file_path = None
     try:
         await message.bot.send_chat_action(message.chat.id, "typing")
         
-        # Берем фото наилучшего качества
         photo = message.photo[-1]
         file_info = await message.bot.get_file(photo.file_id)
         photo_file_path = f"photo_{message.from_user.id}.jpg"
-        
         await message.bot.download_file(file_info.file_path, photo_file_path)
 
-        # Загружаем файл в Gemini для мультимодального анализа
+        # Загружаем файл через клиент Google GenAI
         uploaded_file = client.files.upload(file=photo_file_path)
-        
-        prompt_text = message.caption if message.caption else "Найди информацию об этом товаре, опиши его характеристики, назначение и помоги найти похожие варианты."
+        prompt_text = message.caption if message.caption else "Оцени этот товар, опиши его и помоги найти."
 
         response = client.models.generate_content(
-            model='gemini-3.6-flash',
+            model=FAST_MODEL,
             contents=[uploaded_file, prompt_text]
         )
         
@@ -89,15 +86,15 @@ async def handle_photo(message: types.Message):
 
     except Exception as e:
         if "503" in str(e) or "UNAVAILABLE" in str(e):
-            await message.answer("Сервер временно перегружен. Повтори попытку через секунду.")
+            await message.answer("Сервер перегружен. Повтори отправку фото через пару секунд.")
         else:
-            await message.answer(f"Ошибка при обработке фото: {e}")
+            await message.answer(f"Ошибка: {e}")
             
     finally:
         if photo_file_path and os.path.exists(photo_file_path):
             os.remove(photo_file_path)
 
-# Обработка голосовых сообщений
+# Обработка голосовых сообщений (с улучшенным чтением аудио)
 @dp.message(F.voice)
 async def handle_voice(message: types.Message):
     voice_file_path = None
@@ -111,8 +108,8 @@ async def handle_voice(message: types.Message):
         audio_file = client.files.upload(file=voice_file_path)
 
         response = client.models.generate_content(
-            model='gemini-3.6-flash',
-            contents=[audio_file, "Прослушай это голосовое сообщение, расшифруй суть и дай развернутый ответ."]
+            model=FAST_MODEL,
+            contents=[audio_file, "Внимательно прослушай это голосовое сообщение, расшифруй суть и ответь на него четко и по делу."]
         )
         
         await message.answer(response.text)
@@ -121,7 +118,7 @@ async def handle_voice(message: types.Message):
         if "503" in str(e) or "UNAVAILABLE" in str(e):
             await message.answer("Сервер перегружен. Повтори голосовое.")
         else:
-            await message.answer(f"Ошибка при обработке голосового: {e}")
+            await message.answer(f"Ошибка обработки голоса: {e}")
             
     finally:
         if voice_file_path and os.path.exists(voice_file_path):
@@ -131,16 +128,17 @@ async def handle_voice(message: types.Message):
 @dp.message(F.text)
 async def chat_with_gemini(message: types.Message):
     try:
+        await message.bot.send_chat_action(message.chat.id, "typing")
         response = client.models.generate_content(
-            model='gemini-3.6-flash',
+            model=FAST_MODEL,
             contents=message.text,
         )
         await message.answer(response.text)
     except Exception as e:
         if "503" in str(e) or "UNAVAILABLE" in str(e):
-            await message.answer("Сервер Gemini сейчас перегружен. Пожалуйста, повтори запрос.")
+            await message.answer("Сервер перегружен. Повтори запрос.")
         else:
-            await message.answer(f"Произошла ошибка: {e}")
+            await message.answer(f"Ошибка: {e}")
 
 async def main():
     asyncio.create_task(web_server())
@@ -149,4 +147,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
             
