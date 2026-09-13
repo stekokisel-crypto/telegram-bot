@@ -23,7 +23,7 @@ async def chat_with_groq(message: types.Message):
             messages=[
                 {"role": "user", "content": message.text}
             ],
-            model="llama-3.3-70b-versatile",
+            model="qwen/qwen3.6-27b",
         )
         answer = chat_completion.choices[0].message.content
         await message.answer(answer)
