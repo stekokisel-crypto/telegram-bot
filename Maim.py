@@ -4,7 +4,6 @@ from aiohttp import web
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from google import genai
-from google.genai import types as genai_types
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -30,8 +29,8 @@ async def web_server():
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     await message.answer(
-        "Привет! Ассистент с поиском в реальном времени и ссылками готов к работе.\n\n"
-        "🔗 Напиши что найти (например: *«купи керамогранит в Днепре»*)\n"
+        "Привет! Ассистент готов к работе на максимальной скорости.\n\n"
+        "💬 Задавай любые вопросы, ищи товары и информацию\n"
         "📸 Отправляй фото\n"
         "🎙 Отправляй голосовые"
     )
@@ -59,43 +58,28 @@ async def cmd_generate_image(message: types.Message):
         await message.answer(f"Не удалось сгенерировать: {e}")
 
 @dp.message(F.text)
-async def chat_with_search(message: types.Message):
+async def chat_with_gemini(message: types.Message):
     try:
         await message.bot.send_chat_action(message.chat.id, "typing")
         
-        # Запрос с поиском Google для реального времени и ссылок
-        response = client.models.generate_content(
-            model=FAST_MODEL,
-            contents=message.text,
-            config=genai_types.GenerateContentConfig(
-                tools=[genai_types.Tool(google_search=genai_types.GoogleSearch())],
-            )
+        # Запрос к модели с четкой инструкцией подбирать актуальные данные и ссылки
+        prompt = (
+            f"Пользователь спрашивает: '{message.text}'. "
+            "Дай подробный, полезный ответ. Если применимо (например, поиск товаров или услуг), "
+            "укажи ориентиры, где это можно найти, и актуальные ссылки на основные маркетплейсы или сайты."
         )
         
-        reply_text = response.text if response.text else "Информация не найдена."
-        
-        # Автоматический сбор и добавление ссылок из результатов поиска
-        links_section = ""
-        if response.candidates and response.candidates[0].grounding_metadata:
-            metadata = response.candidates[0].grounding_metadata
-            if metadata.grounding_chunks:
-                sources = []
-                for chunk in metadata.grounding_chunks:
-                    if chunk.web and chunk.web.uri:
-                        title = chunk.web.title or "Ссылка на сайт"
-                        url = chunk.web.uri
-                        sources.append(f"• [{title}]({url})")
-                if sources:
-                    links_section = "\n\n🔗 **Найденные ссылки:**\n" + "\n".join(sources[:5])
-
-        await message.answer(reply_text + links_section, parse_mode="Markdown", disable_web_page_preview=True)
-
+        response = client.models.generate_content(
+            model=FAST_MODEL,
+            contents=prompt,
+        )
+        await message.answer(response.text, parse_mode="Markdown", disable_web_page_preview=True)
     except Exception as e:
         error_str = str(e)
         if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
-            await message.answer("⚠️ Превышен лимит бесплатных запросов к поиску Google. Пожалуйста, подождите 1-2 минуты и повторите попытку.")
+            await message.answer("⚠️ Слишком много запросов. Подождите 30 секунд.")
         else:
-            await message.answer(f"Ошибка запроса: {e}")
+            await message.answer(f"Ошибка: {e}")
 
 @dp.message(F.photo)
 async def handle_photo(message: types.Message):
@@ -108,31 +92,13 @@ async def handle_photo(message: types.Message):
         await message.bot.download_file(file_info.file_path, photo_file_path)
 
         uploaded_file = client.files.upload(file=photo_file_path)
-        prompt_text = message.caption if message.caption else "Найди информацию об этом товаре в интернете, дай описание и ссылки."
+        prompt_text = message.caption if message.caption else "Опиши этот товар, оцени его и подскажи, где его можно найти."
 
         response = client.models.generate_content(
             model=FAST_MODEL,
-            contents=[uploaded_file, prompt_text],
-            config=genai_types.GenerateContentConfig(
-                tools=[genai_types.Tool(google_search=genai_types.GoogleSearch())],
-            )
+            contents=[uploaded_file, prompt_text]
         )
-        
-        reply_text = response.text if response.text else "Информация не найдена."
-        links_section = ""
-        if response.candidates and response.candidates[0].grounding_metadata:
-            metadata = response.candidates[0].grounding_metadata
-            if metadata.grounding_chunks:
-                sources = []
-                for chunk in metadata.grounding_chunks:
-                    if chunk.web and chunk.web.uri:
-                        title = chunk.web.title or "Ссылка"
-                        url = chunk.web.uri
-                        sources.append(f"• [{title}]({url})")
-                if sources:
-                    links_section = "\n\n🔗 **Ссылки:**\n" + "\n".join(sources[:5])
-
-        await message.answer(reply_text + links_section, parse_mode="Markdown", disable_web_page_preview=True)
+        await message.answer(response.text, parse_mode="Markdown")
     except Exception as e:
         await message.answer(f"Ошибка с фото: {e}")
     finally:
@@ -152,27 +118,9 @@ async def handle_voice(message: types.Message):
 
         response = client.models.generate_content(
             model=FAST_MODEL,
-            contents=[audio_file, "Прослушай голосовое сообщение, выполни поиск в интернете и предоставь ответ с ссылками."],
-            config=genai_types.GenerateContentConfig(
-                tools=[genai_types.Tool(genai_types.GoogleSearch())],
-            )
+            contents=[audio_file, "Прослушай голосовое сообщение, пойми суть задачи и дай развернутый ответ."]
         )
-        
-        reply_text = response.text if response.text else "Информация не найдена."
-        links_section = ""
-        if response.candidates and response.candidates[0].grounding_metadata:
-            metadata = response.candidates[0].grounding_metadata
-            if metadata.grounding_chunks:
-                sources = []
-                for chunk in metadata.grounding_chunks:
-                    if chunk.web and chunk.web.uri:
-                        title = chunk.web.title or "Ссылка"
-                        url = chunk.web.uri
-                        sources.append(f"• [{title}]({url})")
-                if sources:
-                    links_section = "\n\n🔗 **Ссылки:**\n" + "\n".join(sources[:5])
-
-        await message.answer(reply_text + links_section, parse_Mode="Markdown", disable_web_page_preview=True)
+        await message.answer(response.text, parse_mode="Markdown")
     except Exception as e:
         await message.answer(f"Ошибка с голосом: {e}")
     finally:
@@ -186,4 +134,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-                                           
